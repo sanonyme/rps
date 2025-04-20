@@ -8,12 +8,23 @@ import java.util.concurrent.*;
 public class RPSServer {
     private static final int DEFAULT_PORT = 5000;
     private static final int WINS_NEEDED = 3; // Number of wins needed to win a match
+    private static final String SCORES_FILE = "player_scores.dat"; // File to store scores
+    private static final int HEARTBEAT_PORT = 5001; // Port for heartbeat broadcasts
+    private static final int HEARTBEAT_INTERVAL = 3000; // Milliseconds between heartbeats
     private ServerSocket serverSocket;
     private final Map<String, ClientHandler> clients = new ConcurrentHashMap<>();
-    private final Map<String, Integer> scores = new ConcurrentHashMap<>();
+    private final Map<String, Integer> scores = new HashMap<>();
     private final Map<ClientHandler, ClientHandler> matches = new ConcurrentHashMap<>();
     private final Map<ClientHandler, String> moves = new ConcurrentHashMap<>();
     private final Map<ClientHandler, Integer> roundWins = new ConcurrentHashMap<>(); // Track wins in current match
+    private HeartbeatBroadcaster heartbeatBroadcaster;
+
+    // Maps for invitation management
+    private final Map<ClientHandler, ClientHandler> pendingInvitations = new ConcurrentHashMap<>(); // inviter ->
+                                                                                                    // invitee
+    private final Map<ClientHandler, List<ClientHandler>> queuedInvitations = new ConcurrentHashMap<>(); // busy player
+                                                                                                         // -> list of
+                                                                                                         // inviters
 
     public static void main(String[] args) {
         int port = DEFAULT_PORT;
@@ -28,6 +39,7 @@ public class RPSServer {
         }
 
         RPSServer server = new RPSServer();
+        server.loadScores(); // Load scores from file
         server.start(port);
     }
 
@@ -42,6 +54,11 @@ public class RPSServer {
             }
 
             System.out.println("RPS Server started on port " + port);
+
+            // Start heartbeat broadcasting
+            heartbeatBroadcaster = new HeartbeatBroadcaster(port);
+            new Thread(heartbeatBroadcaster).start();
+            System.out.println("Server discovery heartbeat started on port " + HEARTBEAT_PORT);
 
             while (true) {
                 Socket clientSocket = serverSocket.accept();
@@ -60,6 +77,14 @@ public class RPSServer {
 
     public void stop() {
         try {
+            // Save scores before shutting down
+            saveScores();
+
+            // Stop the heartbeat broadcaster if it's running
+            if (heartbeatBroadcaster != null) {
+                heartbeatBroadcaster.stop();
+            }
+
             if (serverSocket != null && !serverSocket.isClosed()) {
                 serverSocket.close();
             }
@@ -85,6 +110,8 @@ public class RPSServer {
                 matches.remove(opponent);
                 opponent.sendMessage("***Your opponent has disconnected***");
             }
+            // Save scores when a client disconnects
+            saveScores();
         }
     }
 
@@ -94,6 +121,17 @@ public class RPSServer {
 
     public synchronized int getScore(String nickname) {
         return scores.getOrDefault(nickname, 0);
+    }
+
+    public synchronized void setScore(String nickname, int score) {
+        scores.put(nickname, score);
+        // Save scores whenever they are updated
+        saveScores();
+    }
+
+    private synchronized void incrementScore(String nickname) {
+        int newScore = scores.getOrDefault(nickname, 0) + 1;
+        scores.put(nickname, newScore);
     }
 
     public synchronized void playGame(ClientHandler player) {
@@ -107,25 +145,7 @@ public class RPSServer {
         for (ClientHandler client : clients.values()) {
             if (client != player && !matches.containsKey(client) && client.isWaitingForMatch()) {
                 // Match found
-                matches.put(player, client);
-                matches.put(client, player);
-
-                moves.remove(player);
-                moves.remove(client);
-
-                // Reset round wins for both players
-                roundWins.put(player, 0);
-                roundWins.put(client, 0);
-
-                player.sendMessage("***You are now playing with " + client.getNickname() + "***");
-                player.sendMessage("***First to win " + WINS_NEEDED + " rounds wins the match!***");
-                player.sendMessage("***Choose your move: R (Rock), P (Paper), or S (Scissors)***");
-
-                client.sendMessage("***You are now playing with " + player.getNickname() + "***");
-                client.sendMessage("***First to win " + WINS_NEEDED + " rounds wins the match!***");
-                client.sendMessage("***Choose your move: R (Rock), P (Paper), or S (Scissors)***");
-
-                client.setWaitingForMatch(false);
+                startMatch(player, client);
                 return;
             }
         }
@@ -133,6 +153,134 @@ public class RPSServer {
         // No match found, put player in waiting state
         player.setWaitingForMatch(true);
         player.sendMessage("***Waiting for another player to join***");
+    }
+
+    public synchronized void invitePlayer(ClientHandler inviter, String targetNickname) {
+        // Check if inviter is already in a match
+        if (matches.containsKey(inviter)) {
+            inviter.sendMessage("***You are already in a game***");
+            return;
+        }
+
+        // Check if target exists
+        if (!clients.containsKey(targetNickname)) {
+            inviter.sendMessage("***Player '" + targetNickname + "' not found***");
+            return;
+        }
+
+        // Don't allow self-invites
+        if (inviter.getNickname().equals(targetNickname)) {
+            inviter.sendMessage("***You cannot invite yourself***");
+            return;
+        }
+
+        ClientHandler target = clients.get(targetNickname);
+
+        // Check if target is already in a match
+        if (matches.containsKey(target)) {
+            inviter.sendMessage(
+                    "***Player '" + targetNickname + "' is currently in a game. Your invitation will be queued.***");
+
+            // Queue the invitation
+            queuedInvitations.computeIfAbsent(target, k -> new ArrayList<>()).add(inviter);
+            return;
+        }
+
+        // Send invitation
+        inviter.sendMessage("***Invitation sent to " + targetNickname + "***");
+        target.sendMessage("***You have an invitation from " + inviter.getNickname() + ", play game? (y/n)***");
+
+        // Record the pending invitation
+        pendingInvitations.put(inviter, target);
+    }
+
+    public synchronized void handleInvitationResponse(ClientHandler responder, boolean accepted) {
+        // Find who invited this player
+        ClientHandler inviter = null;
+        for (Map.Entry<ClientHandler, ClientHandler> entry : pendingInvitations.entrySet()) {
+            if (entry.getValue() == responder) {
+                inviter = entry.getKey();
+                break;
+            }
+        }
+
+        if (inviter == null) {
+            responder.sendMessage("***You don't have any pending invitations***");
+            return;
+        }
+
+        // Remove the pending invitation
+        pendingInvitations.remove(inviter);
+
+        // Both players must not be in other matches
+        if (matches.containsKey(inviter) || matches.containsKey(responder)) {
+            if (!matches.containsKey(responder)) {
+                responder.sendMessage("***Inviter is already in another game***");
+            }
+            if (!matches.containsKey(inviter)) {
+                inviter.sendMessage("***Invited player is already in another game***");
+            }
+            return;
+        }
+
+        if (accepted) {
+            // Start the match
+            inviter.sendMessage("***" + responder.getNickname() + " accepted your invitation***");
+            startMatch(inviter, responder);
+        } else {
+            // Invitation declined
+            inviter.sendMessage("***" + responder.getNickname() + " declined your invitation***");
+            responder.sendMessage("***You declined the invitation***");
+        }
+    }
+
+    private synchronized void checkQueuedInvitations(ClientHandler player) {
+        List<ClientHandler> inviters = queuedInvitations.get(player);
+        if (inviters != null && !inviters.isEmpty()) {
+            // Get the first invitation in the queue
+            ClientHandler inviter = inviters.remove(0);
+
+            // Update the queue
+            if (inviters.isEmpty()) {
+                queuedInvitations.remove(player);
+            } else {
+                queuedInvitations.put(player, inviters);
+            }
+
+            // Check if inviter is still available
+            if (!matches.containsKey(inviter)) {
+                // Notify about the queued invitation
+                player.sendMessage(
+                        "***You have a queued invitation from " + inviter.getNickname() + ", play game? (y/n)***");
+                inviter.sendMessage("***Your queued invitation to " + player.getNickname() + " is now active***");
+
+                // Record the pending invitation
+                pendingInvitations.put(inviter, player);
+            }
+        }
+    }
+
+    private synchronized void startMatch(ClientHandler player1, ClientHandler player2) {
+        matches.put(player1, player2);
+        matches.put(player2, player1);
+
+        moves.remove(player1);
+        moves.remove(player2);
+
+        // Reset round wins for both players
+        roundWins.put(player1, 0);
+        roundWins.put(player2, 0);
+
+        player1.sendMessage("***You are now playing with " + player2.getNickname() + "***");
+        player1.sendMessage("***First to win " + WINS_NEEDED + " rounds wins the match!***");
+        player1.sendMessage("***Choose your move: R (Rock), P (Paper), or S (Scissors)***");
+
+        player2.sendMessage("***You are now playing with " + player1.getNickname() + "***");
+        player2.sendMessage("***First to win " + WINS_NEEDED + " rounds wins the match!***");
+        player2.sendMessage("***Choose your move: R (Rock), P (Paper), or S (Scissors)***");
+
+        player2.setWaitingForMatch(false);
+        player1.setWaitingForMatch(false);
     }
 
     public synchronized void handleMove(ClientHandler player, String move) {
@@ -160,8 +308,7 @@ public class RPSServer {
                 roundWins.put(player, playerWins);
 
                 // Update overall score
-                int newScore = scores.getOrDefault(player.getNickname(), 0) + 1;
-                scores.put(player.getNickname(), newScore);
+                incrementScore(player.getNickname());
 
                 player.sendMessage("***You won this round! (Round wins: " + playerWins + "/" + WINS_NEEDED + ")***");
                 opponent.sendMessage("***You lost this round! (Round wins: " + roundWins.getOrDefault(opponent, 0) + "/"
@@ -171,6 +318,9 @@ public class RPSServer {
                 if (playerWins >= WINS_NEEDED) {
                     player.sendMessage("***Congratulations! You've won the match!***");
                     opponent.sendMessage("***You've lost the match. Better luck next time!***");
+
+                    // Save scores when a match is completed
+                    saveScores();
 
                     // End the match
                     endMatch(player, opponent);
@@ -184,8 +334,7 @@ public class RPSServer {
                 roundWins.put(opponent, opponentWins);
 
                 // Update overall score
-                int newScore = scores.getOrDefault(opponent.getNickname(), 0) + 1;
-                scores.put(opponent.getNickname(), newScore);
+                incrementScore(opponent.getNickname());
 
                 opponent.sendMessage(
                         "***You won this round! (Round wins: " + opponentWins + "/" + WINS_NEEDED + ")***");
@@ -196,6 +345,9 @@ public class RPSServer {
                 if (opponentWins >= WINS_NEEDED) {
                     opponent.sendMessage("***Congratulations! You've won the match!***");
                     player.sendMessage("***You've lost the match. Better luck next time!***");
+
+                    // Save scores when a match is completed
+                    saveScores();
 
                     // End the match
                     endMatch(player, opponent);
@@ -239,6 +391,10 @@ public class RPSServer {
         opponent.sendMessage("***Your overall score is " + scores.getOrDefault(opponent.getNickname(), 0) + "***");
         player.sendMessage("***Type 'play' to start a new game***");
         opponent.sendMessage("***Type 'play' to start a new game***");
+
+        // Check if there are queued invitations for either player
+        checkQueuedInvitations(player);
+        checkQueuedInvitations(opponent);
     }
 
     private int determineWinner(String playerMove, String opponentMove) {
@@ -252,6 +408,101 @@ public class RPSServer {
             return 1; // Player wins
         } else {
             return -1; // Opponent wins
+        }
+    }
+
+    // Load scores from file
+    private synchronized void loadScores() {
+        File file = new File(SCORES_FILE);
+        if (file.exists()) {
+            try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(file))) {
+                @SuppressWarnings("unchecked")
+                Map<String, Integer> loadedScores = (Map<String, Integer>) ois.readObject();
+                scores.clear();
+                scores.putAll(loadedScores);
+                System.out.println("Loaded " + scores.size() + " player scores from file.");
+            } catch (Exception e) {
+                System.err.println("Error loading scores: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }
+    }
+
+    // Save scores to file
+    private synchronized void saveScores() {
+        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(SCORES_FILE))) {
+            oos.writeObject(new HashMap<>(scores));
+            System.out.println("Saved " + scores.size() + " player scores to file.");
+        } catch (Exception e) {
+            System.err.println("Error saving scores: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    // Inner class for broadcasting server heartbeats
+    private class HeartbeatBroadcaster implements Runnable {
+        private volatile boolean running = true;
+        private final int serverPort;
+        private DatagramSocket socket;
+
+        public HeartbeatBroadcaster(int serverPort) {
+            this.serverPort = serverPort;
+        }
+
+        @Override
+        public void run() {
+            try {
+                socket = new DatagramSocket();
+                socket.setBroadcast(true);
+
+                while (running) {
+                    broadcastHeartbeat();
+                    Thread.sleep(HEARTBEAT_INTERVAL);
+                }
+            } catch (IOException e) {
+                if (running) {
+                    System.err.println("Heartbeat broadcaster error: " + e.getMessage());
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                if (socket != null && !socket.isClosed()) {
+                    socket.close();
+                }
+            }
+        }
+
+        private void broadcastHeartbeat() throws IOException {
+            // Create a heartbeat message with server IP and port
+            InetAddress localAddress = getLocalAddress();
+            String message = "RPS_SERVER:" + localAddress.getHostAddress() + ":" + serverPort;
+            byte[] buffer = message.getBytes();
+
+            // Broadcast to the local network
+            InetAddress broadcastAddress = InetAddress.getByName("255.255.255.255");
+            DatagramPacket packet = new DatagramPacket(buffer, buffer.length, broadcastAddress, HEARTBEAT_PORT);
+            socket.send(packet);
+        }
+
+        private InetAddress getLocalAddress() {
+            try {
+                return InetAddress.getLocalHost();
+            } catch (UnknownHostException e) {
+                System.err.println("Could not determine local address: " + e.getMessage());
+                // Fallback to a loopback address
+                try {
+                    return InetAddress.getByName("127.0.0.1");
+                } catch (UnknownHostException ex) {
+                    throw new RuntimeException("Could not create loopback address", ex);
+                }
+            }
+        }
+
+        public void stop() {
+            running = false;
+            if (socket != null && !socket.isClosed()) {
+                socket.close();
+            }
         }
     }
 }
@@ -304,11 +555,22 @@ class ClientHandler implements Runnable {
             out.println("***Welcome " + nickname
                     + "! Type 'play' to start a game, 'score' to see your score, or 'players' to list online players***");
             out.println("***When in a game, use: R (Rock), P (Paper), or S (Scissors) to make your move***");
+            out.println("***You can also invite a specific player with 'play NICKNAME'***");
 
             String inputLine;
             while ((inputLine = in.readLine()) != null) {
                 if (inputLine.equalsIgnoreCase("play")) {
                     server.playGame(this);
+                } else if (inputLine.toLowerCase().startsWith("play ")) {
+                    // Handle targeted invitation (play NICKNAME)
+                    String targetNickname = inputLine.substring(5).trim();
+                    server.invitePlayer(this, targetNickname);
+                } else if (inputLine.equalsIgnoreCase("y") || inputLine.equalsIgnoreCase("yes")) {
+                    // Accept invitation
+                    server.handleInvitationResponse(this, true);
+                } else if (inputLine.equalsIgnoreCase("n") || inputLine.equalsIgnoreCase("no")) {
+                    // Decline invitation
+                    server.handleInvitationResponse(this, false);
                 } else if (inputLine.equalsIgnoreCase("score")) {
                     int score = server.getScore(nickname);
                     out.println("***Your score is " + score + "***");
@@ -320,7 +582,8 @@ class ClientHandler implements Runnable {
                         inputLine.equalsIgnoreCase("S")) {
                     server.handleMove(this, inputLine.toUpperCase());
                 } else {
-                    out.println("***Invalid command. Available commands: play, score, players, R, P, S***");
+                    out.println(
+                            "***Invalid command. Available commands: play, play NICKNAME, y/n (for invitations), score, players, R, P, S***");
                 }
             }
         } catch (IOException e) {

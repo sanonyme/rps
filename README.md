@@ -1,6 +1,15 @@
 # Multiplayer Rock Paper Scissors (LAN Edition)
 
-A text-based LAN multiplayer Rock Paper Scissors game implemented in Java.
+A multiplayer Rock Paper Scissors game implemented in Java that can be played over a local network.
+
+## Features
+
+- Text-based and graphical user interface options
+- Automatic server discovery via network heartbeat
+- Player vs player matches with multi-round games
+- Persistent score tracking
+- Player invitations
+- Chat functionality
 
 ## Getting Started
 
@@ -17,7 +26,7 @@ A text-based LAN multiplayer Rock Paper Scissors game implemented in Java.
 ./compile_and_run.sh
 ```
 
-This will compile the code and create two executable scripts: `rps_server` and `rps`.
+This will compile the code and create three executable scripts: `rps_server`, `rps` (text client), and `rps_gui` (graphical client).
 
 ## Running the Game
 
@@ -29,39 +38,78 @@ This will compile the code and create two executable scripts: `rps_server` and `
 ./rps_server
 ```
 
-The server will start on port 5000 and display "RPS Server started on port 5000".
+The server will start on port 5000 by default. You can specify a different port as an argument:
+
+```sh
+./rps_server 6000
+```
 
 ### Connecting with Clients
 
-1. Start the RPS client:
+#### Text Client
+
+1. Start the RPS text client:
 
 ```sh
 ./rps
 ```
 
-2. When prompted, enter:
-   - Server IP (the IP address of the computer running the server)
-   - Server port (5000 by default)
+2. Choose connection option:
+   - Manual connection: Enter server IP and port
+   - Automatic discovery: Select from discovered servers on your network
+
+3. Choose a nickname when prompted.
+
+#### Graphical Client
+
+1. Start the RPS GUI client:
+
+```sh
+./rps_gui
+```
+
+2. In the connection screen:
+   - Enter server details manually OR
+   - Click "Discover Servers" to find servers on your network
+   - Double-click a discovered server to connect
 
 3. Choose a nickname when prompted.
 
 ## Playing the Game
 
+### Text Client Commands
+
 Once connected, you can use the following commands:
 
 - `play` - Start a game (waits for another player)
+- `play NICKNAME` - Invite a specific player to a game
+- `y` or `yes` - Accept an invitation
+- `n` or `no` - Decline an invitation
 - `score` - View your current score
 - `players` - List players currently in the lobby
+- `exit` - Disconnect from the server
 
 When in a game, you can play by sending:
 - `R` - Rock
 - `P` - Paper
 - `S` - Scissors
 
-The server will match you with another player who is also waiting to play.
+### GUI Client
+
+The graphical interface provides buttons for all game actions:
+
+- "Play Game" - Start matchmaking
+- "Show Score" - Display your score
+- "Show Players" - List online players
+- Rock, Paper, Scissors buttons for making moves
+- Text input field for chat and commands
+
+## Network Discovery
+
+The game implements automatic server discovery using UDP broadcast heartbeats. This allows clients to find servers running on the local network without knowing the exact IP address.
 
 ## Notes
 
 - If you experience network issues, make sure your firewall is not blocking the connection.
-- Commands are case-insensitive.
-- Your score is reset when you disconnect from the server. 
+- Scores are persistent and saved on the server.
+- First player to win 3 rounds wins the match (configurable on server). 

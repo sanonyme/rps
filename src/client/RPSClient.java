@@ -2,7 +2,8 @@ package src.client;
 
 import java.io.*;
 import java.net.*;
-import java.util.Scanner;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class RPSClient {
     private Socket socket;
@@ -10,6 +11,9 @@ public class RPSClient {
     private BufferedReader in;
     private Scanner scanner;
     private volatile boolean running = true;
+    private static final int HEARTBEAT_PORT = 5001; // Must match server's heartbeat port
+    private static final int DISCOVERY_TIMEOUT = 5000; // Time to wait for server responses in ms
+    private final Map<String, ServerInfo> discoveredServers = new ConcurrentHashMap<>();
 
     public static void main(String[] args) {
         RPSClient client = new RPSClient();
@@ -19,14 +23,133 @@ public class RPSClient {
     public void start() {
         scanner = new Scanner(System.in);
 
+        System.out.println("Rock-Paper-Scissors Game Client");
+        System.out.println("==============================");
+        System.out.println("1. Connect to server manually");
+        System.out.println("2. Discover servers automatically");
+        System.out.print("Choose an option (1-2): ");
+
+        String option = scanner.nextLine();
+
+        if ("2".equals(option)) {
+            discoverServers();
+
+            if (discoveredServers.isEmpty()) {
+                System.out.println("No servers found. Falling back to manual connection.");
+                connectManually();
+            } else {
+                connectToDiscoveredServer();
+            }
+        } else {
+            connectManually();
+        }
+    }
+
+    private void connectManually() {
         System.out.print("Enter server IP: ");
         String serverIP = scanner.nextLine();
 
         System.out.print("Enter server port: ");
         int serverPort = Integer.parseInt(scanner.nextLine());
 
+        connectToServer(serverIP, serverPort);
+    }
+
+    private void discoverServers() {
+        System.out.println("Discovering servers...");
+
+        // Start server discovery thread
+        Thread discoveryThread = new Thread(this::listenForHeartbeats);
+        discoveryThread.setDaemon(true);
+        discoveryThread.start();
+
+        // Wait for discovery period
         try {
-            connectToServer(serverIP, serverPort);
+            Thread.sleep(DISCOVERY_TIMEOUT);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        System.out.println("\nDiscovered " + discoveredServers.size() + " server(s)");
+    }
+
+    private void listenForHeartbeats() {
+        try (DatagramSocket socket = new DatagramSocket(HEARTBEAT_PORT)) {
+            socket.setBroadcast(true);
+            socket.setSoTimeout(DISCOVERY_TIMEOUT);
+
+            byte[] buffer = new byte[512];
+            DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+
+            while (true) {
+                try {
+                    socket.receive(packet);
+                    String message = new String(packet.getData(), 0, packet.getLength());
+                    processHeartbeat(message, packet.getAddress().getHostAddress());
+                } catch (SocketTimeoutException e) {
+                    // Discovery time ended
+                    break;
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Error during server discovery: " + e.getMessage());
+        }
+    }
+
+    private void processHeartbeat(String message, String sourceIP) {
+        // Parse the heartbeat message
+        if (message.startsWith("RPS_SERVER:")) {
+            String[] parts = message.split(":");
+            if (parts.length >= 3) {
+                String serverIP = parts[1];
+                int serverPort = Integer.parseInt(parts[2]);
+
+                // Store server info
+                String key = serverIP + ":" + serverPort;
+                discoveredServers.put(key, new ServerInfo(serverIP, serverPort));
+                System.out.println("Discovered server: " + key);
+            }
+        }
+    }
+
+    private void connectToDiscoveredServer() {
+        if (discoveredServers.isEmpty()) {
+            System.out.println("No servers available.");
+            return;
+        }
+
+        // Display available servers
+        System.out.println("\nAvailable servers:");
+        int index = 1;
+        List<String> serverKeys = new ArrayList<>(discoveredServers.keySet());
+
+        for (String key : serverKeys) {
+            System.out.println(index + ". " + key);
+            index++;
+        }
+
+        // Let user select a server
+        System.out.print("Choose a server (1-" + serverKeys.size() + "): ");
+        try {
+            int selection = Integer.parseInt(scanner.nextLine());
+
+            if (selection >= 1 && selection <= serverKeys.size()) {
+                ServerInfo selectedServer = discoveredServers.get(serverKeys.get(selection - 1));
+                connectToServer(selectedServer.getIp(), selectedServer.getPort());
+            } else {
+                System.out.println("Invalid selection. Exiting.");
+            }
+        } catch (NumberFormatException e) {
+            System.out.println("Invalid input. Exiting.");
+        }
+    }
+
+    private void connectToServer(String serverIP, int serverPort) {
+        try {
+            socket = new Socket(serverIP, serverPort);
+            out = new PrintWriter(socket.getOutputStream(), true);
+            in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            System.out.println("Connected to server " + serverIP + ":" + serverPort);
 
             // Start a thread to handle server messages
             Thread serverThread = new Thread(this::handleServerMessages);
@@ -48,13 +171,6 @@ public class RPSClient {
         } finally {
             closeConnection();
         }
-    }
-
-    private void connectToServer(String serverIP, int serverPort) throws IOException {
-        socket = new Socket(serverIP, serverPort);
-        out = new PrintWriter(socket.getOutputStream(), true);
-        in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-        System.out.println("Connected to server " + serverIP + ":" + serverPort);
     }
 
     private void handleServerMessages() {
@@ -106,6 +222,25 @@ public class RPSClient {
             }
         } catch (IOException e) {
             e.printStackTrace();
+        }
+    }
+
+    // Inner class to store server information
+    private static class ServerInfo {
+        private final String ip;
+        private final int port;
+
+        public ServerInfo(String ip, int port) {
+            this.ip = ip;
+            this.port = port;
+        }
+
+        public String getIp() {
+            return ip;
+        }
+
+        public int getPort() {
+            return port;
         }
     }
 }
