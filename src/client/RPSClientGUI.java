@@ -9,6 +9,7 @@ import java.io.*;
 import java.net.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class RPSClientGUI extends JFrame {
     private Socket socket;
@@ -18,6 +19,7 @@ public class RPSClientGUI extends JFrame {
     private static final int HEARTBEAT_PORT = 5001; // Must match server's heartbeat port
     private static final int DISCOVERY_TIMEOUT = 5000; // Time to wait for server responses in ms
     private final Map<String, ServerInfo> discoveredServers = new ConcurrentHashMap<>();
+    private final AtomicBoolean discoveryActive = new AtomicBoolean(false);
 
     // Game state tracking
     private boolean inGame = false;
@@ -407,70 +409,74 @@ public class RPSClientGUI extends JFrame {
     }
 
     private void discoverServers() {
-        discoverButton.setEnabled(false);
-        discoverButton.setText("Discovering...");
-        serverListModel.clear();
         discoveredServers.clear();
+        serverListModel.clear();
+        appendToGameLog("Discovering servers...");
+        discoverButton.setEnabled(false);
+        statusLabel.setText("Status: Discovering servers...");
 
-        // Start server discovery thread
-        Thread discoveryThread = new Thread(this::listenForHeartbeats);
-        discoveryThread.setDaemon(true);
-        discoveryThread.start();
+        discoveryActive.set(true);
 
-        // Wait for discovery period
+        // Start discovery in a separate thread
         new Thread(() -> {
+            // Start server discovery thread
+            Thread discoveryThread = new Thread(this::listenForHeartbeats);
+            discoveryThread.setDaemon(true);
+            discoveryThread.start();
+
+            // Wait for discovery period
             try {
                 Thread.sleep(DISCOVERY_TIMEOUT);
-                SwingUtilities.invokeLater(() -> {
-                    discoverButton.setEnabled(true);
-                    discoverButton.setText("Discover Servers");
-
-                    if (discoveredServers.isEmpty()) {
-                        JOptionPane.showMessageDialog(this,
-                                "No servers found on the network.",
-                                "Discovery Complete",
-                                JOptionPane.INFORMATION_MESSAGE);
-                    }
-                });
+                discoveryActive.set(false);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
+
+            // Update UI with results
+            SwingUtilities.invokeLater(() -> {
+                for (String serverKey : discoveredServers.keySet()) {
+                    serverListModel.addElement(serverKey);
+                }
+
+                discoverButton.setEnabled(true);
+                if (discoveredServers.isEmpty()) {
+                    statusLabel.setText("Status: No servers found");
+                    appendToGameLog("No servers found");
+                } else {
+                    statusLabel.setText("Status: Found " + discoveredServers.size() + " server(s)");
+                    appendToGameLog("Found " + discoveredServers.size() + " server(s)");
+                }
+            });
         }).start();
     }
 
     private void listenForHeartbeats() {
         try (DatagramSocket socket = new DatagramSocket(HEARTBEAT_PORT)) {
             socket.setBroadcast(true);
-            socket.setSoTimeout(DISCOVERY_TIMEOUT);
+            socket.setSoTimeout(1000); // 1-second timeout to allow loop interruption
 
             byte[] buffer = new byte[512];
             DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
 
-            while (true) {
+            while (discoveryActive.get()) {
                 try {
                     socket.receive(packet);
                     String message = new String(packet.getData(), 0, packet.getLength());
                     processHeartbeat(message, packet.getAddress().getHostAddress());
                 } catch (SocketTimeoutException e) {
-                    // Discovery time ended
-                    break;
+                    // This is expected, continue loop
                 }
             }
         } catch (IOException e) {
             SwingUtilities.invokeLater(() -> {
-                JOptionPane.showMessageDialog(this,
-                        "Error during server discovery: " + e.getMessage(),
-                        "Error",
-                        JOptionPane.ERROR_MESSAGE);
-                discoverButton.setEnabled(true);
-                discoverButton.setText("Discover Servers");
+                appendToGameLog("Error during server discovery: " + e.getMessage());
             });
         }
     }
 
     private void processHeartbeat(String message, String sourceIP) {
         // Parse the heartbeat message
-        if (message.startsWith("RPS_SERVER:")) {
+        if (message.startsWith("RPS_SERVER:") && discoveryActive.get()) {
             String[] parts = message.split(":");
             if (parts.length >= 3) {
                 String serverIP = parts[1];
@@ -478,56 +484,42 @@ public class RPSClientGUI extends JFrame {
 
                 // Store server info
                 String key = serverIP + ":" + serverPort;
-                discoveredServers.put(key, new ServerInfo(serverIP, serverPort));
-
-                SwingUtilities.invokeLater(() -> {
-                    // Add to the list if not already there
-                    if (!containsServer(key)) {
+                if (!discoveredServers.containsKey(key)) {
+                    discoveredServers.put(key, new ServerInfo(serverIP, serverPort));
+                    SwingUtilities.invokeLater(() -> {
                         serverListModel.addElement(key);
-                    }
-                });
+                        appendToGameLog("Discovered server: " + key);
+                    });
+                }
             }
         }
-    }
-
-    private boolean containsServer(String key) {
-        for (int i = 0; i < serverListModel.getSize(); i++) {
-            if (serverListModel.getElementAt(i).equals(key)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private void connectToServer(String serverIP, int serverPort) {
         try {
+            // Close existing connection if any
+            if (out != null) {
+                out.close();
+                in.close();
+                socket.close();
+            }
+
+            // Attempt to connect
             socket = new Socket(serverIP, serverPort);
             out = new PrintWriter(socket.getOutputStream(), true);
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
+            // Update UI
+            setConnectionStatus(true);
+            appendToGameLog("Connected to server " + serverIP + ":" + serverPort);
+
             // Start a thread to handle server messages
-            Thread serverThread = new Thread(this::handleServerMessages);
-            serverThread.setDaemon(true);
-            serverThread.start();
-
-            // Switch to game panel
-            SwingUtilities.invokeLater(() -> {
-                setGameButtonsEnabled(true);
-                cardLayout.show((Container) gamePanel.getParent(), "game");
-                inputField.requestFocus();
-                messageArea.append("Connected to server " + serverIP + ":" + serverPort + "\n");
-
-                // Reset the game state
-                inGame = false;
-                opponentName = null;
-                statusLabel.setText("Not in a game");
-                scoreLabel.setText("Score: 0 - 0");
-                resetGameDisplay();
-            });
+            new Thread(this::handleServerMessages).start();
 
         } catch (IOException e) {
+            appendToGameLog("Error connecting to server: " + e.getMessage());
             JOptionPane.showMessageDialog(this,
-                    "Error connecting to server: " + e.getMessage(),
+                    "Failed to connect: " + e.getMessage(),
                     "Connection Error",
                     JOptionPane.ERROR_MESSAGE);
         }
@@ -538,7 +530,6 @@ public class RPSClientGUI extends JFrame {
             String message;
             while (running && (message = in.readLine()) != null) {
                 final String displayMessage = message;
-
                 SwingUtilities.invokeLater(() -> {
                     messageArea.append(displayMessage + "\n");
                     // Auto-scroll to bottom
@@ -551,10 +542,8 @@ public class RPSClientGUI extends JFrame {
         } catch (IOException e) {
             if (running) {
                 SwingUtilities.invokeLater(() -> {
-                    messageArea.append("Lost connection to server: " + e.getMessage() + "\n");
-                    setGameButtonsEnabled(false);
-                    // Switch back to connection panel
-                    cardLayout.show((Container) gamePanel.getParent(), "connection");
+                    appendToGameLog("Lost connection to server: " + e.getMessage());
+                    setConnectionStatus(false);
                 });
             }
         }
@@ -709,6 +698,22 @@ public class RPSClientGUI extends JFrame {
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    private void setConnectionStatus(boolean isConnected) {
+        if (isConnected) {
+            statusLabel.setText("Status: Connected");
+            statusLabel.setForeground(new Color(0, 128, 0)); // Dark green
+        } else {
+            statusLabel.setText("Status: Disconnected");
+            statusLabel.setForeground(Color.RED);
+        }
+    }
+
+    private void appendToGameLog(String message) {
+        messageArea.append(message + "\n");
+        // Auto-scroll to bottom
+        messageArea.setCaretPosition(messageArea.getDocument().getLength());
     }
 
     // Inner class to store server information

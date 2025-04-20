@@ -4,6 +4,7 @@ import java.io.*;
 import java.net.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class RPSClient {
     private Socket socket;
@@ -14,6 +15,7 @@ public class RPSClient {
     private static final int HEARTBEAT_PORT = 5001; // Must match server's heartbeat port
     private static final int DISCOVERY_TIMEOUT = 5000; // Time to wait for server responses in ms
     private final Map<String, ServerInfo> discoveredServers = new ConcurrentHashMap<>();
+    private final AtomicBoolean discoveryActive = new AtomicBoolean(false);
 
     public static void main(String[] args) {
         RPSClient client = new RPSClient();
@@ -57,6 +59,7 @@ public class RPSClient {
 
     private void discoverServers() {
         System.out.println("Discovering servers...");
+        discoveryActive.set(true);
 
         // Start server discovery thread
         Thread discoveryThread = new Thread(this::listenForHeartbeats);
@@ -66,6 +69,7 @@ public class RPSClient {
         // Wait for discovery period
         try {
             Thread.sleep(DISCOVERY_TIMEOUT);
+            discoveryActive.set(false);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
@@ -81,7 +85,7 @@ public class RPSClient {
             byte[] buffer = new byte[512];
             DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
 
-            while (true) {
+            while (discoveryActive.get()) {
                 try {
                     socket.receive(packet);
                     String message = new String(packet.getData(), 0, packet.getLength());
@@ -98,7 +102,7 @@ public class RPSClient {
 
     private void processHeartbeat(String message, String sourceIP) {
         // Parse the heartbeat message
-        if (message.startsWith("RPS_SERVER:")) {
+        if (message.startsWith("RPS_SERVER:") && discoveryActive.get()) {
             String[] parts = message.split(":");
             if (parts.length >= 3) {
                 String serverIP = parts[1];
@@ -106,8 +110,11 @@ public class RPSClient {
 
                 // Store server info
                 String key = serverIP + ":" + serverPort;
-                discoveredServers.put(key, new ServerInfo(serverIP, serverPort));
-                System.out.println("Discovered server: " + key);
+                // Only add and print if this server wasn't already discovered
+                if (!discoveredServers.containsKey(key)) {
+                    discoveredServers.put(key, new ServerInfo(serverIP, serverPort));
+                    System.out.println("Discovered server: " + key);
+                }
             }
         }
     }
@@ -134,6 +141,9 @@ public class RPSClient {
             int selection = Integer.parseInt(scanner.nextLine());
 
             if (selection >= 1 && selection <= serverKeys.size()) {
+                // Stop discovery before connecting
+                discoveryActive.set(false);
+
                 ServerInfo selectedServer = discoveredServers.get(serverKeys.get(selection - 1));
                 connectToServer(selectedServer.getIp(), selectedServer.getPort());
             } else {
