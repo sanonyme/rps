@@ -9,7 +9,8 @@ A multiplayer Rock Paper Scissors game implemented in Java that can be played ov
 - Player vs player matches with multi-round games
 - Persistent score tracking
 - Player invitations
-- Chat functionality
+- Chat functionality commands
+- Coffee Bet Mode (loser buys the winner a coffee)
 
 ## Getting Started
 
@@ -82,9 +83,10 @@ The server will start on port 5000 by default. You can specify a different port 
 Once connected, you can use the following commands:
 
 - `play` - Start a game (waits for another player)
+- `play coffee` - Start a game with Coffee Bet Mode where the loser buys a coffee
 - `play NICKNAME` - Invite a specific player to a game
-- `y` or `yes` - Accept an invitation
-- `n` or `no` - Decline an invitation
+- `y` or `yes` - Accept an invitation or coffee bet challenge
+- `n` or `no` - Decline an invitation or coffee bet challenge
 - `score` - View your current score
 - `players` - List players currently in the lobby
 - `exit` - Disconnect from the server
@@ -101,8 +103,22 @@ The graphical interface provides buttons for all game actions:
 - "Play Game" - Start matchmaking
 - "Show Score" - Display your score
 - "Show Players" - List online players
+- "Coffee Bet Mode" - Toggle the coffee bet mode (loser buys winner a coffee)
 - Rock, Paper, Scissors buttons for making moves
 - Text input field for chat and commands
+
+## Game Modes
+
+### Standard Mode
+The standard game where players compete to win 3 rounds first.
+
+### Coffee Bet Mode
+A fun way to play with stakes! In this mode:
+- The loser of the match buys the winner a coffee
+- Players must both consent to Coffee Bet Mode
+- If a player with Coffee Bet Mode is matched with a regular player, the regular player will be asked if they accept the coffee bet challenge
+- The GUI client has a checkbox to enable Coffee Bet Mode
+- In text client, use the `play coffee` command
 
 ## Network Discovery
 
