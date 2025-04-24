@@ -22,14 +22,14 @@ public class RPSClientGUI extends JFrame {
     private final Map<String, ServerInfo> discoveredServers = new ConcurrentHashMap<>();
     private final AtomicBoolean discoveryActive = new AtomicBoolean(false);
 
-    // Game state tracking
+    // Game state
     private boolean inGame = false;
     private String opponentName;
     private int playerWins = 0;
     private int opponentWins = 0;
     private int winsNeeded = 3;
     private boolean coffeeBetMode = false;
-    private boolean nicknameAccepted = false; // Track if nickname has been accepted
+    private boolean nicknameAccepted = false; // Username accepted?
 
     // GUI Components
     private JTextArea messageArea;
@@ -103,7 +103,7 @@ public class RPSClientGUI extends JFrame {
     }
 
     private void loadIcons() {
-        // Create simple icons using Unicode characters
+        // Use Unicode emojis for game icons
         rockIcon = createTextIcon("🪨", 32);
         paperIcon = createTextIcon("📃", 32);
         scissorsIcon = createTextIcon("✂", 32);
@@ -454,7 +454,7 @@ public class RPSClientGUI extends JFrame {
     }
 
     private void discoverServers() {
-        // Clear previously discovered servers
+        // Reset server list
         discoveredServers.clear();
         serverListModel.clear();
 
@@ -464,14 +464,13 @@ public class RPSClientGUI extends JFrame {
 
         discoveryActive.set(true);
 
-        // Start discovery in a separate thread
+        // Find servers in background
         new Thread(() -> {
-            // Start server discovery thread
             Thread discoveryThread = new Thread(this::listenForHeartbeats);
             discoveryThread.setDaemon(true);
             discoveryThread.start();
 
-            // Wait for discovery period
+            // Wait a bit
             try {
                 Thread.sleep(DISCOVERY_TIMEOUT);
                 discoveryActive.set(false);
@@ -479,7 +478,7 @@ public class RPSClientGUI extends JFrame {
                 Thread.currentThread().interrupt();
             }
 
-            // Update UI with results
+            // Show results
             SwingUtilities.invokeLater(() -> {
                 discoverButton.setEnabled(true);
                 if (discoveredServers.isEmpty()) {

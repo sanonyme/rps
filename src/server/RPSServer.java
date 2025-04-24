@@ -11,29 +11,25 @@ import java.util.concurrent.*;
 
 public class RPSServer {
     private static final int DEFAULT_PORT = 5000;
-    private static final int WINS_NEEDED = 3; // Number of wins needed to win a match
-    private static final String SCORES_FILE = "player_scores.dat"; // File to store scores
-    private static final int HEARTBEAT_PORT = 5001; // Port for heartbeat broadcasts
-    private static final int HEARTBEAT_INTERVAL = 3000; // Milliseconds between heartbeats
+    private static final int WINS_NEEDED = 3; // Wins needed for a match
+    private static final String SCORES_FILE = "player_scores.dat"; // Saved scores
+    private static final int HEARTBEAT_PORT = 5001; // For auto-discovery
+    private static final int HEARTBEAT_INTERVAL = 3000; // 3 seconds between pings
     private ServerSocket serverSocket;
     private final Map<String, ClientHandler> clients = new ConcurrentHashMap<>();
     private final Map<String, Integer> scores = new HashMap<>();
     private final Map<ClientHandler, ClientHandler> matches = new ConcurrentHashMap<>();
     private final Map<ClientHandler, String> moves = new ConcurrentHashMap<>();
-    private final Map<ClientHandler, Integer> roundWins = new ConcurrentHashMap<>(); // Track wins in current match
-    private final Map<ClientHandler, Boolean> coffeeBetMode = new ConcurrentHashMap<>(); // Track coffee bet mode
-    private final Map<ClientHandler, ClientHandler> pendingCoffeeBetRequests = new ConcurrentHashMap<>(); // Track
-                                                                                                          // pending
-                                                                                                          // coffee bet
+    private final Map<ClientHandler, Integer> roundWins = new ConcurrentHashMap<>(); // Current match wins
+    private final Map<ClientHandler, Boolean> coffeeBetMode = new ConcurrentHashMap<>(); // Coffee mode status
+    private final Map<ClientHandler, ClientHandler> pendingCoffeeBetRequests = new ConcurrentHashMap<>(); // Coffee bet
                                                                                                           // requests
     private HeartbeatBroadcaster heartbeatBroadcaster;
 
-    // Maps for invitation management
-    private final Map<ClientHandler, ClientHandler> pendingInvitations = new ConcurrentHashMap<>(); // inviter ->
-                                                                                                    // invitee
-    private final Map<ClientHandler, List<ClientHandler>> queuedInvitations = new ConcurrentHashMap<>(); // busy player
-                                                                                                         // -> list of
-                                                                                                         // inviters
+    // Invitation tracking
+    private final Map<ClientHandler, ClientHandler> pendingInvitations = new ConcurrentHashMap<>(); // Sender->receiver
+    private final Map<ClientHandler, List<ClientHandler>> queuedInvitations = new ConcurrentHashMap<>(); // For busy
+                                                                                                         // players
 
     public static void main(String[] args) {
         int port = DEFAULT_PORT;

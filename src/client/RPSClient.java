@@ -12,11 +12,11 @@ public class RPSClient {
     private BufferedReader in;
     private Scanner scanner;
     private volatile boolean running = true;
-    private static final int HEARTBEAT_PORT = 5001; // Must match server's heartbeat port
-    private static final int DISCOVERY_TIMEOUT = 5000; // Time to wait for server responses in ms
+    private static final int HEARTBEAT_PORT = 5001; // Same as server
+    private static final int DISCOVERY_TIMEOUT = 5000; // 5 sec discovery window
     private final Map<String, ServerInfo> discoveredServers = new ConcurrentHashMap<>();
     private final AtomicBoolean discoveryActive = new AtomicBoolean(false);
-    private volatile boolean nicknameAccepted = false; // Flag to track if nickname has been accepted
+    private volatile boolean nicknameAccepted = false; // Username set?
 
     public static void main(String[] args) {
         RPSClient client = new RPSClient();
@@ -92,7 +92,7 @@ public class RPSClient {
                     String message = new String(packet.getData(), 0, packet.getLength());
                     processHeartbeat(message, packet.getAddress().getHostAddress());
                 } catch (SocketTimeoutException e) {
-                    // Discovery time ended
+                    // Time's up
                     break;
                 }
             }
