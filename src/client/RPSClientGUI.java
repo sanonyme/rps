@@ -61,6 +61,8 @@ public class RPSClientGUI extends JFrame {
     private ImageIcon scissorsIcon;
     private ImageIcon questionIcon;
 
+    private JPanel mainPanel; // Add reference to the main panel
+
     public static void main(String[] args) {
         try {
             // Set system look and feel
@@ -297,9 +299,9 @@ public class RPSClientGUI extends JFrame {
 
     private void layoutComponents() {
         // Set up the card layout
-        JPanel mainPanel = new JPanel(cardLayout);
+        mainPanel = new JPanel(cardLayout);
         mainPanel.add(connectionPanel, "connection");
-        mainPanel.add(gamePanel, "game");
+        mainPanel.add(gamePanel, "gamePanel");
 
         // Add to frame
         add(mainPanel);
@@ -512,6 +514,10 @@ public class RPSClientGUI extends JFrame {
             // Update UI
             setConnectionStatus(true);
             appendToGameLog("Connected to server " + serverIP + ":" + serverPort);
+
+            // Switch to game panel
+            cardLayout.show(mainPanel, "gamePanel");
+            setGameButtonsEnabled(true);
 
             // Start a thread to handle server messages
             new Thread(this::handleServerMessages).start();

@@ -2,6 +2,10 @@ package src.server;
 
 import java.io.*;
 import java.net.*;
+// Explicitly import Inet4Address for better network interface handling
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -94,6 +98,9 @@ public class RPSServer {
     }
 
     public synchronized boolean registerClient(String nickname, ClientHandler handler) {
+        if (nickname == null) {
+            return false;
+        }
         if (clients.containsKey(nickname)) {
             return false;
         }
@@ -486,8 +493,28 @@ public class RPSServer {
 
         private InetAddress getLocalAddress() {
             try {
+                // Try to find a non-loopback address
+                Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+                while (interfaces.hasMoreElements()) {
+                    NetworkInterface networkInterface = interfaces.nextElement();
+                    // Skip loopback and inactive interfaces
+                    if (networkInterface.isLoopback() || !networkInterface.isUp()) {
+                        continue;
+                    }
+
+                    Enumeration<InetAddress> addresses = networkInterface.getInetAddresses();
+                    while (addresses.hasMoreElements()) {
+                        InetAddress addr = addresses.nextElement();
+                        // Prefer IPv4 addresses
+                        if (!addr.isLoopbackAddress() && addr instanceof Inet4Address) {
+                            return addr;
+                        }
+                    }
+                }
+
+                // If no suitable address was found, use the default
                 return InetAddress.getLocalHost();
-            } catch (UnknownHostException e) {
+            } catch (Exception e) {
                 System.err.println("Could not determine local address: " + e.getMessage());
                 // Fallback to a loopback address
                 try {
