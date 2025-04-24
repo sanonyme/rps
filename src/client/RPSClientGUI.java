@@ -135,8 +135,6 @@ public class RPSClientGUI extends JFrame {
         JLabel portLabel = new JLabel("Server Port:");
         serverPortField = new JTextField("5000");
         connectButton = new JButton("Connect");
-        connectButton.setBackground(new Color(100, 180, 100));
-        connectButton.setForeground(Color.WHITE);
         manualPanel.add(ipLabel);
         manualPanel.add(serverIPField);
         manualPanel.add(portLabel);
@@ -153,8 +151,6 @@ public class RPSClientGUI extends JFrame {
         JPanel discoveryPanel = new JPanel(new BorderLayout());
         discoveryPanel.setBorder(BorderFactory.createTitledBorder("Auto Discovery"));
         discoverButton = new JButton("Discover Servers");
-        discoverButton.setBackground(new Color(100, 150, 200));
-        discoverButton.setForeground(Color.WHITE);
         discoveryPanel.add(discoverButton, BorderLayout.NORTH);
         discoveryPanel.add(serverListScrollPane, BorderLayout.CENTER);
 
@@ -250,8 +246,6 @@ public class RPSClientGUI extends JFrame {
         controlPanel.setBorder(BorderFactory.createTitledBorder("Game Controls"));
 
         playButton = new JButton("Play Game");
-        playButton.setBackground(new Color(100, 180, 100));
-        playButton.setForeground(Color.WHITE);
 
         scoreButton = new JButton("Show Score");
         playersButton = new JButton("Show Players");
@@ -270,8 +264,6 @@ public class RPSClientGUI extends JFrame {
         inputPanel.setBorder(BorderFactory.createTitledBorder("Chat/Commands"));
         inputPanel.add(inputField, BorderLayout.CENTER);
         sendButton = new JButton("Send");
-        sendButton.setBackground(new Color(100, 150, 200));
-        sendButton.setForeground(Color.WHITE);
         inputPanel.add(sendButton, BorderLayout.EAST);
 
         // Left side panel with game visuals and controls
