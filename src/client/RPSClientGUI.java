@@ -106,7 +106,7 @@ public class RPSClientGUI extends JFrame {
         // Create simple icons using Unicode characters
         rockIcon = createTextIcon("🪨", 32);
         paperIcon = createTextIcon("📃", 32);
-        scissorsIcon = createTextIcon("✂️", 32);
+        scissorsIcon = createTextIcon("✂", 32);
         questionIcon = createTextIcon("❓", 32);
     }
 
