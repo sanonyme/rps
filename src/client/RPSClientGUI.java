@@ -408,7 +408,7 @@ public class RPSClientGUI extends JFrame {
 
         playersButton.addActionListener(e -> {
             sendCommand("players");
-            // Don't show the dialog window anymore
+            // Just display in chat - no window
         });
 
         // Input field and send button
@@ -739,13 +739,6 @@ public class RPSClientGUI extends JFrame {
             updateGameStatus();
         }
 
-        // Handle player list response
-        else if (message.contains("***Online players: ")) {
-            String playerList = message.substring("***Online players: ".length());
-            // Don't update the dialog model, we're using command line display only
-            // The players are already displayed in the messageArea through the
-            // handleServerMessages method
-        }
     }
 
     private void updateMoveDisplay(String playerMove, String opponentMove) {
