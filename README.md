@@ -1,5 +1,9 @@
 # Multiplayer Rock Paper Scissors (LAN Edition)
 
+<p align="center">
+  <img src="images/rps_logo.png" alt="Rock Paper Scissors Logo" width="800">
+</p>
+
 A multiplayer Rock Paper Scissors game implemented in Java that can be played over a local network.
 
 ## Features
