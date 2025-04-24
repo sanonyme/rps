@@ -16,6 +16,7 @@ public class RPSClient {
     private static final int DISCOVERY_TIMEOUT = 5000; // Time to wait for server responses in ms
     private final Map<String, ServerInfo> discoveredServers = new ConcurrentHashMap<>();
     private final AtomicBoolean discoveryActive = new AtomicBoolean(false);
+    private volatile boolean nicknameAccepted = false; // Flag to track if nickname has been accepted
 
     public static void main(String[] args) {
         RPSClient client = new RPSClient();
@@ -188,6 +189,21 @@ public class RPSClient {
             String message;
             while (running && (message = in.readLine()) != null) {
                 System.out.println(message);
+
+                // Check if this is the welcome message after nickname setup
+                if (message.contains("***Welcome ") && message.contains("! Type 'play'")) {
+                    nicknameAccepted = true;
+
+                    // Display the help message after the welcome message
+                    System.out.println("\nAvailable commands:");
+                    System.out.println("- play: Find a match with another player");
+                    System.out.println("- play coffee: Find a match with Coffee Bet Mode (loser buys coffee)");
+                    System.out.println("- play NICKNAME: Invite a specific player");
+                    System.out.println("- score: Show your current score");
+                    System.out.println("- players: List all online players");
+                    System.out.println("- R/P/S: Make a move (Rock, Paper, Scissors)");
+                    System.out.println("- exit: Disconnect from the server\n");
+                }
             }
         } catch (IOException e) {
             if (running) {
@@ -205,6 +221,8 @@ public class RPSClient {
                     running = false;
                     break;
                 }
+
+                // Send the command to the server
                 out.println(userInput);
             } catch (Exception e) {
                 if (running) {

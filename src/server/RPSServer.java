@@ -21,6 +21,11 @@ public class RPSServer {
     private final Map<ClientHandler, ClientHandler> matches = new ConcurrentHashMap<>();
     private final Map<ClientHandler, String> moves = new ConcurrentHashMap<>();
     private final Map<ClientHandler, Integer> roundWins = new ConcurrentHashMap<>(); // Track wins in current match
+    private final Map<ClientHandler, Boolean> coffeeBetMode = new ConcurrentHashMap<>(); // Track coffee bet mode
+    private final Map<ClientHandler, ClientHandler> pendingCoffeeBetRequests = new ConcurrentHashMap<>(); // Track
+                                                                                                          // pending
+                                                                                                          // coffee bet
+                                                                                                          // requests
     private HeartbeatBroadcaster heartbeatBroadcaster;
 
     // Maps for invitation management
@@ -151,7 +156,17 @@ public class RPSServer {
         // Look for another player waiting for a match
         for (ClientHandler client : clients.values()) {
             if (client != player && !matches.containsKey(client) && client.isWaitingForMatch()) {
-                // Match found
+                // Check if the waiting player has coffee bet mode enabled
+                if (coffeeBetMode.getOrDefault(client, false)) {
+                    // Ask this player if they want to play a coffee bet game
+                    player.sendMessage("***Player " + client.getNickname()
+                            + " wants to play a Coffee Bet game (loser buys coffee)***");
+                    player.sendMessage("***Do you accept the Coffee Bet challenge? (y/n)***");
+                    pendingCoffeeBetRequests.put(player, client);
+                    return;
+                }
+
+                // Match found (regular game)
                 startMatch(player, client);
                 return;
             }
@@ -160,6 +175,40 @@ public class RPSServer {
         // No match found, put player in waiting state
         player.setWaitingForMatch(true);
         player.sendMessage("***Waiting for another player to join***");
+    }
+
+    public synchronized void playCoffeeBetGame(ClientHandler player) {
+        // If player is already in a match, don't queue them again
+        if (matches.containsKey(player)) {
+            player.sendMessage("***You are already in a game***");
+            return;
+        }
+
+        // Set coffee bet mode for this player
+        coffeeBetMode.put(player, true);
+        player.sendMessage("***Coffee Bet Mode enabled! Winner gets a coffee!***");
+
+        // Look for another player waiting for a match
+        for (ClientHandler client : clients.values()) {
+            if (client != player && !matches.containsKey(client) && client.isWaitingForMatch()) {
+                // If the other player doesn't have coffee bet mode, ask them
+                if (!coffeeBetMode.getOrDefault(client, false)) {
+                    client.sendMessage("***Player " + player.getNickname()
+                            + " wants to play a Coffee Bet game (loser buys coffee)***");
+                    client.sendMessage("***Do you accept the Coffee Bet challenge? (y/n)***");
+                    pendingCoffeeBetRequests.put(client, player);
+                    return;
+                }
+
+                // Both players have coffee bet mode, start match
+                startMatch(player, client);
+                return;
+            }
+        }
+
+        // No match found, put player in waiting state
+        player.setWaitingForMatch(true);
+        player.sendMessage("***Waiting for another player to join with Coffee Bet Mode***");
     }
 
     public synchronized void invitePlayer(ClientHandler inviter, String targetNickname) {
@@ -278,6 +327,15 @@ public class RPSServer {
         roundWins.put(player1, 0);
         roundWins.put(player2, 0);
 
+        // Check if this is a coffee bet match
+        boolean isCoffeeBet = coffeeBetMode.getOrDefault(player1, false) &&
+                coffeeBetMode.getOrDefault(player2, false);
+
+        if (isCoffeeBet) {
+            player1.sendMessage("***Coffee Bet Mode enabled!***");
+            player2.sendMessage("***Coffee Bet Mode enabled!***");
+        }
+
         player1.sendMessage("***You are now playing with " + player2.getNickname() + "***");
         player1.sendMessage("***First to win " + WINS_NEEDED + " rounds wins the match!***");
         player1.sendMessage("***Choose your move: R (Rock), P (Paper), or S (Scissors)***");
@@ -393,6 +451,10 @@ public class RPSServer {
         moves.remove(player);
         moves.remove(opponent);
 
+        // Reset coffee bet mode
+        coffeeBetMode.remove(player);
+        coffeeBetMode.remove(opponent);
+
         // Let players know they can play again
         player.sendMessage("***Your overall score is " + scores.getOrDefault(player.getNickname(), 0) + "***");
         opponent.sendMessage("***Your overall score is " + scores.getOrDefault(opponent.getNickname(), 0) + "***");
@@ -444,6 +506,55 @@ public class RPSServer {
             System.err.println("Error saving scores: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    public synchronized void handleCoffeeBetResponse(ClientHandler responder, boolean accepted) {
+        // Find who requested the coffee bet
+        ClientHandler requester = pendingCoffeeBetRequests.get(responder);
+        if (requester == null) {
+            responder.sendMessage("***You don't have any pending coffee bet challenges***");
+            return;
+        }
+
+        // Remove the pending request
+        pendingCoffeeBetRequests.remove(responder);
+
+        // Both players must not be in other matches
+        if (matches.containsKey(requester) || matches.containsKey(responder)) {
+            if (!matches.containsKey(responder)) {
+                responder.sendMessage("***Requester is already in another game***");
+            }
+            if (!matches.containsKey(requester)) {
+                requester.sendMessage("***Player is already in another game***");
+            }
+            return;
+        }
+
+        if (accepted) {
+            // Set coffee bet mode for the responder as well
+            coffeeBetMode.put(responder, true);
+
+            // Start the match with coffee bet mode
+            requester.sendMessage("***" + responder.getNickname() + " accepted your coffee bet challenge!***");
+            responder.sendMessage("***You accepted the coffee bet challenge!***");
+            startMatch(requester, responder);
+        } else {
+            // Invitation declined
+            requester.sendMessage("***" + responder.getNickname() + " declined your coffee bet challenge***");
+            responder.sendMessage("***You declined the coffee bet challenge***");
+
+            // Reset coffee bet mode for requester if they initiated specifically for this
+            // challenge
+            if (requester.isWaitingForMatch()) {
+                coffeeBetMode.remove(requester);
+                requester.setWaitingForMatch(false);
+                requester.sendMessage("***Coffee Bet Mode disabled***");
+            }
+        }
+    }
+
+    public synchronized boolean hasPendingCoffeeBetRequest(ClientHandler client) {
+        return pendingCoffeeBetRequests.containsKey(client);
     }
 
     // Inner class for broadcasting server heartbeats
@@ -588,16 +699,28 @@ class ClientHandler implements Runnable {
             while ((inputLine = in.readLine()) != null) {
                 if (inputLine.equalsIgnoreCase("play")) {
                     server.playGame(this);
+                } else if (inputLine.equalsIgnoreCase("play coffee")) {
+                    server.playCoffeeBetGame(this);
                 } else if (inputLine.toLowerCase().startsWith("play ")) {
                     // Handle targeted invitation (play NICKNAME)
                     String targetNickname = inputLine.substring(5).trim();
                     server.invitePlayer(this, targetNickname);
                 } else if (inputLine.equalsIgnoreCase("y") || inputLine.equalsIgnoreCase("yes")) {
-                    // Accept invitation
-                    server.handleInvitationResponse(this, true);
+                    // Check if this is a response to a coffee bet challenge
+                    if (server.hasPendingCoffeeBetRequest(this)) {
+                        server.handleCoffeeBetResponse(this, true);
+                    } else {
+                        // Otherwise, it's a regular invitation response
+                        server.handleInvitationResponse(this, true);
+                    }
                 } else if (inputLine.equalsIgnoreCase("n") || inputLine.equalsIgnoreCase("no")) {
-                    // Decline invitation
-                    server.handleInvitationResponse(this, false);
+                    // Check if this is a response to a coffee bet challenge
+                    if (server.hasPendingCoffeeBetRequest(this)) {
+                        server.handleCoffeeBetResponse(this, false);
+                    } else {
+                        // Otherwise, it's a regular invitation response
+                        server.handleInvitationResponse(this, false);
+                    }
                 } else if (inputLine.equalsIgnoreCase("score")) {
                     int score = server.getScore(nickname);
                     out.println("***Your score is " + score + "***");
@@ -610,7 +733,7 @@ class ClientHandler implements Runnable {
                     server.handleMove(this, inputLine.toUpperCase());
                 } else {
                     out.println(
-                            "***Invalid command. Available commands: play, play NICKNAME, y/n (for invitations), score, players, R, P, S***");
+                            "***Invalid command. Available commands: play, play coffee, play NICKNAME, y/n (for invitations), score, players, R, P, S***");
                 }
             }
         } catch (IOException e) {
