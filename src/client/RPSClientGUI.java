@@ -335,10 +335,25 @@ public class RPSClientGUI extends JFrame {
                 if (e.getClickCount() == 2) {
                     int index = serverList.getSelectedIndex();
                     if (index >= 0) {
-                        String key = serverListModel.getElementAt(index);
-                        ServerInfo server = discoveredServers.get(key);
-                        if (server != null) {
-                            connectToServer(server.getIp(), server.getPort());
+                        String displayName = serverListModel.getElementAt(index);
+
+                        // Find the matching server info based on port number
+                        int port = -1;
+                        if (displayName.startsWith("RPS Server @")) {
+                            try {
+                                port = Integer.parseInt(displayName.substring("RPS Server @".length()));
+                            } catch (NumberFormatException ex) {
+                                // Ignore parsing errors
+                            }
+                        }
+
+                        // Find the server with this port
+                        for (Map.Entry<String, ServerInfo> entry : discoveredServers.entrySet()) {
+                            if (entry.getValue().getPort() == port) {
+                                ServerInfo server = entry.getValue();
+                                connectToServer(server.getIp(), server.getPort());
+                                return;
+                            }
                         }
                     }
                 }
@@ -411,8 +426,10 @@ public class RPSClientGUI extends JFrame {
     }
 
     private void discoverServers() {
+        // Clear previously discovered servers
         discoveredServers.clear();
         serverListModel.clear();
+
         appendToGameLog("Discovering servers...");
         discoverButton.setEnabled(false);
         statusLabel.setText("Status: Discovering servers...");
@@ -436,10 +453,6 @@ public class RPSClientGUI extends JFrame {
 
             // Update UI with results
             SwingUtilities.invokeLater(() -> {
-                for (String serverKey : discoveredServers.keySet()) {
-                    serverListModel.addElement(serverKey);
-                }
-
                 discoverButton.setEnabled(true);
                 if (discoveredServers.isEmpty()) {
                     statusLabel.setText("Status: No servers found");
@@ -481,16 +494,22 @@ public class RPSClientGUI extends JFrame {
         if (message.startsWith("RPS_SERVER:") && discoveryActive.get()) {
             String[] parts = message.split(":");
             if (parts.length >= 3) {
-                String serverIP = parts[1];
+                // Use the source IP (where the heartbeat came from) instead of the IP in the
+                // message
+                // This ensures we connect to the actual reachable IP address
+                String serverIP = sourceIP;
                 int serverPort = Integer.parseInt(parts[2]);
 
-                // Store server info
+                // Store server info - use simple server name to avoid duplicates
+                String serverName = "RPS Server @" + serverPort;
                 String key = serverIP + ":" + serverPort;
+
                 if (!discoveredServers.containsKey(key)) {
                     discoveredServers.put(key, new ServerInfo(serverIP, serverPort));
                     SwingUtilities.invokeLater(() -> {
-                        serverListModel.addElement(key);
-                        appendToGameLog("Discovered server: " + key);
+                        // Use a more friendly display name in the UI
+                        serverListModel.addElement(serverName);
+                        appendToGameLog("Discovered server: " + serverName + " (" + key + ")");
                     });
                 }
             }
