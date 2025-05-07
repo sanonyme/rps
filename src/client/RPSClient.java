@@ -16,7 +16,6 @@ public class RPSClient {
     private static final int DISCOVERY_TIMEOUT = 5000; // 5 sec discovery window
     private final Map<String, ServerInfo> discoveredServers = new ConcurrentHashMap<>();
     private final AtomicBoolean discoveryActive = new AtomicBoolean(false);
-    private volatile boolean nicknameAccepted = false; // Username set?
 
     public static void main(String[] args) {
         RPSClient client = new RPSClient();
@@ -192,13 +191,13 @@ public class RPSClient {
 
                 // Check if this is the welcome message after nickname setup
                 if (message.contains("***Welcome ") && message.contains("! Type 'play'")) {
-                    nicknameAccepted = true;
 
                     // Display the help message after the welcome message
                     System.out.println("\nAvailable commands:");
                     System.out.println("- play: Find a match with another player");
                     System.out.println("- play coffee: Find a match with Coffee Bet Mode (loser buys coffee)");
                     System.out.println("- play NICKNAME: Invite a specific player");
+                    System.out.println("- play NICKNAME coffee: Invite a specific player with Coffee Bet Mode");
                     System.out.println("- score: Show your current score");
                     System.out.println("- players: List all online players");
                     System.out.println("- R/P/S: Make a move (Rock, Paper, Scissors)");

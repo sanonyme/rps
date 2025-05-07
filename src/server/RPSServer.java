@@ -238,12 +238,24 @@ public class RPSServer {
             return;
         }
 
+        // Check if inviter has coffee bet mode enabled
+        boolean isCoffeeBet = coffeeBetMode.getOrDefault(inviter, false);
+
         // Send invitation
         inviter.sendMessage("***Invitation sent to " + targetNickname + "***");
-        target.sendMessage("***You have an invitation from " + inviter.getNickname() + ", play game? (y/n)***");
 
-        // Record the pending invitation
-        pendingInvitations.put(inviter, target);
+        if (isCoffeeBet) {
+            // Send a coffee bet invitation instead of a regular one
+            target.sendMessage("***Player " + inviter.getNickname() +
+                    " wants to play a Coffee Bet game (loser buys coffee)***");
+            target.sendMessage("***Do you accept the Coffee Bet challenge? (y/n)***");
+            pendingCoffeeBetRequests.put(target, inviter);
+        } else {
+            // Regular invitation
+            target.sendMessage("***You have an invitation from " + inviter.getNickname() + ", play game? (y/n)***");
+            // Record the pending invitation
+            pendingInvitations.put(inviter, target);
+        }
     }
 
     public synchronized void handleInvitationResponse(ClientHandler responder, boolean accepted) {
@@ -699,8 +711,20 @@ class ClientHandler implements Runnable {
                     server.playCoffeeBetGame(this);
                 } else if (inputLine.toLowerCase().startsWith("play ")) {
                     // Handle targeted invitation (play NICKNAME)
-                    String targetNickname = inputLine.substring(5).trim();
-                    server.invitePlayer(this, targetNickname);
+                    String targetInput = inputLine.substring(5).trim();
+
+                    // Check if this is a coffee bet invitation (play NICKNAME coffee)
+                    if (targetInput.toLowerCase().endsWith(" coffee")) {
+                        // Extract nickname without the "coffee" suffix
+                        String targetNickname = targetInput.substring(0, targetInput.lastIndexOf(" ")).trim();
+                        // Enable coffee bet mode
+                        server.playCoffeeBetGame(this);
+                        // Then send invitation
+                        server.invitePlayer(this, targetNickname);
+                    } else {
+                        // Regular invitation
+                        server.invitePlayer(this, targetInput);
+                    }
                 } else if (inputLine.equalsIgnoreCase("y") || inputLine.equalsIgnoreCase("yes")) {
                     // Check if this is a response to a coffee bet challenge
                     if (server.hasPendingCoffeeBetRequest(this)) {
@@ -729,7 +753,7 @@ class ClientHandler implements Runnable {
                     server.handleMove(this, inputLine.toUpperCase());
                 } else {
                     out.println(
-                            "***Invalid command. Available commands: play, play coffee, play NICKNAME, y/n (for invitations), score, players, R, P, S***");
+                            "***Invalid command. Available commands: play, play coffee, play NICKNAME, play NICKNAME coffee, y/n (for invitations), score, players, R, P, S***");
                 }
             }
         } catch (IOException e) {

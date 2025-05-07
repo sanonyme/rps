@@ -45,13 +45,6 @@ public class RPSClientGUI extends JFrame {
     private JButton sendButton;
     private JCheckBox coffeeBetCheckbox;
 
-    // Online Players Window
-    private JDialog onlinePlayersDialog;
-    private JList<String> onlinePlayersList;
-    private DefaultListModel<String> onlinePlayersModel;
-    private JButton refreshPlayersButton;
-    private Timer playersRefreshTimer;
-
     // Game move display
     private JLabel playerMoveLabel;
     private JLabel opponentMoveLabel;
@@ -400,22 +393,36 @@ public class RPSClientGUI extends JFrame {
                 appendToGameLog("Looking for a match with Coffee Bet Mode enabled!");
             } else {
                 sendCommand("play");
+                appendToGameLog("Looking for a match...");
             }
             resetGameDisplay();
         });
 
         scoreButton.addActionListener(e -> sendCommand("score"));
 
-        playersButton.addActionListener(e -> {
-            sendCommand("players");
-            // Just display in chat - no window
-        });
+        playersButton.addActionListener(e -> sendCommand("players"));
 
         // Input field and send button
         ActionListener sendAction = e -> {
             String input = inputField.getText().trim();
             if (!input.isEmpty()) {
-                sendCommand(input);
+                // Check if this is a direct invitation and coffee bet mode is enabled
+                if (input.toLowerCase().startsWith("play ") && coffeeBetMode) {
+                    // Extract the target nickname
+                    String targetNickname = input.substring(5).trim();
+
+                    if (!targetNickname.toLowerCase().endsWith(" coffee")) {
+                        // Modify the command to include coffee bet
+                        sendCommand("play " + targetNickname + " coffee");
+                        appendToGameLog("Sending Coffee Bet invitation to " + targetNickname);
+                    } else {
+                        // Command already has the coffee suffix, send as is
+                        sendCommand(input);
+                    }
+                } else {
+                    // Regular command
+                    sendCommand(input);
+                }
                 inputField.setText("");
             }
         };
@@ -611,6 +618,11 @@ public class RPSClientGUI extends JFrame {
             // Nickname was accepted
             nicknameAccepted = true;
             setGameButtonsEnabled(true);
+
+            // Display a quick help tip about coffee bet mode
+            appendToGameLog(
+                    "TIP: To invite a player with Coffee Bet Mode: 1) Check the Coffee Bet Mode box, 2) Type 'play NICKNAME'");
+            appendToGameLog("     Or type 'play NICKNAME coffee' directly.");
         }
 
         // Check if server is asking for a nickname
@@ -785,15 +797,6 @@ public class RPSClientGUI extends JFrame {
     private void closeConnection() {
         running = false;
 
-        // Stop the players refresh timer and close the dialog
-        if (playersRefreshTimer != null) {
-            playersRefreshTimer.stop();
-        }
-
-        if (onlinePlayersDialog != null) {
-            onlinePlayersDialog.dispose();
-        }
-
         try {
             if (out != null) {
                 out.close();
@@ -827,105 +830,6 @@ public class RPSClientGUI extends JFrame {
         messageArea.append(message + "\n");
         // Auto-scroll to bottom
         messageArea.setCaretPosition(messageArea.getDocument().getLength());
-    }
-
-    private void initOnlinePlayersWindow() {
-        // Create the dialog
-        onlinePlayersDialog = new JDialog(this, "Online Players", false);
-        onlinePlayersDialog.setSize(300, 400);
-        onlinePlayersDialog.setLocationRelativeTo(this);
-
-        // Set up the list
-        onlinePlayersModel = new DefaultListModel<>();
-        onlinePlayersList = new JList<>(onlinePlayersModel);
-        onlinePlayersList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-
-        // Add double-click handler for inviting players
-        onlinePlayersList.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                if (e.getClickCount() == 2) {
-                    int index = onlinePlayersList.getSelectedIndex();
-                    if (index >= 0) {
-                        String selectedPlayer = onlinePlayersModel.getElementAt(index);
-                        // Confirm before sending invitation
-                        int choice = JOptionPane.showConfirmDialog(
-                                onlinePlayersDialog,
-                                "Invite " + selectedPlayer + " to a game?",
-                                "Invite Player",
-                                JOptionPane.YES_NO_OPTION);
-
-                        if (choice == JOptionPane.YES_OPTION) {
-                            sendCommand("play " + selectedPlayer);
-                            JOptionPane.showMessageDialog(
-                                    onlinePlayersDialog,
-                                    "Invitation sent to " + selectedPlayer,
-                                    "Invitation Sent",
-                                    JOptionPane.INFORMATION_MESSAGE);
-                        }
-                    }
-                }
-            }
-        });
-
-        // Set up the refresh button
-        refreshPlayersButton = new JButton("Refresh");
-        refreshPlayersButton.addActionListener(e -> refreshPlayersList());
-
-        // Set up auto-refresh timer (every 10 seconds)
-        playersRefreshTimer = new Timer(10000, e -> refreshPlayersList());
-        playersRefreshTimer.setRepeats(true);
-
-        // Layout the components
-        JPanel dialogPanel = new JPanel(new BorderLayout(5, 5));
-        dialogPanel.setBorder(new EmptyBorder(10, 10, 10, 10));
-
-        JScrollPane scrollPane = new JScrollPane(onlinePlayersList);
-        dialogPanel.add(scrollPane, BorderLayout.CENTER);
-
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        buttonPanel.add(refreshPlayersButton);
-        dialogPanel.add(buttonPanel, BorderLayout.SOUTH);
-
-        // Add a label at the top
-        JLabel instructionLabel = new JLabel("Double-click a player to invite them to a game");
-        instructionLabel.setBorder(new EmptyBorder(0, 0, 10, 0));
-        dialogPanel.add(instructionLabel, BorderLayout.NORTH);
-
-        onlinePlayersDialog.setContentPane(dialogPanel);
-    }
-
-    private void showOnlinePlayersWindow() {
-        // Initialize the window if needed
-        if (onlinePlayersDialog == null) {
-            initOnlinePlayersWindow();
-        }
-
-        // Refresh the player list
-        refreshPlayersList();
-
-        // Start the auto-refresh timer
-        playersRefreshTimer.start();
-
-        // Show the dialog
-        onlinePlayersDialog.setVisible(true);
-    }
-
-    private void hideOnlinePlayersWindow() {
-        if (onlinePlayersDialog != null && onlinePlayersDialog.isVisible()) {
-            // Stop the auto-refresh timer
-            playersRefreshTimer.stop();
-
-            // Hide the dialog
-            onlinePlayersDialog.setVisible(false);
-        }
-    }
-
-    private void refreshPlayersList() {
-        // Send a request to the server for the current player list
-        sendCommand("players");
-
-        // The server's response will be processed in processGameMessage()
     }
 
     // Inner class to store server information
